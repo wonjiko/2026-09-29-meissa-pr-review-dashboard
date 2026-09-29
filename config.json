@@ -1,0 +1,13 @@
+{
+  "org": "CARTA-IS",
+  "window_start": "2026-06-01",
+  "window_end": null,
+  "view_default_days": 90,
+  "default_reviewer": "JUNYEONGLEE-Derek",
+  "include_archived": true,
+  "pr_page_size": 25,
+  "review_page_size": 100,
+  "timeline_page_size": 100,
+  "alias_batch_size": 20,
+  "bot_logins": ["github-actions", "dependabot", "renovate", "codecov-commenter"]
+}

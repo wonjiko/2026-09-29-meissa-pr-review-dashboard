@@ -529,3 +529,14 @@ Pages 사이트를 켜 공개 배포했다. Free 플랜에서 private 레포의 
 - 멱등성 재확인: 두 번째 실행은 커밋도 푸시도 하지 않고 서빙 중인 URL만 보고한다.
 
 다음: 수집 갱신 주기 결정. 매일 자동 갱신을 걸면 ./run.sh && ./run.sh pages 두 단계.
+
+### #14 · 2026-10-02 13:47 KST · `f904fc7`
+
+원격의 불용 gh-pages 브랜치를 삭제했다. main 승격 PR은 만들 수 없어 사용자에게 넘겼다.
+
+- origin(파이프라인 레포)의 gh-pages(48bd085)를 삭제. 이 레포는 Pages 사이트가 없고(API 404) 페이지는 별도 public 레포가 서빙하므로 영향 없음.
+- 삭제 후 ./run.sh pages 재실행으로 배포 경로 정상 확인. 로컬 gh-pages 스테이징 ref(7e7f035)는 유지해야 하며 삭제 대상이 아니다.
+- main 승격 PR 불가 사유 두 가지: 원격에 base가 될 main이 없고, 그 main 생성이 보호 브랜치 정책(git-publish-push-protected-branch-name)이 막는 바로 그 동작이다. 또한 main과 initial-import가 동일 커밋 f904fc7이라 diff가 0이어서 PR 자체가 성립하지 않는다.
+- Pages 등록 구조 확인: 페이지 레포의 gh-pages 루트를 legacy build로 서빙, public=true, https_enforced=true, 최근 빌드 7e7f035 built.
+
+다음: main 승격은 사용자가 브랜치 rename 한 줄로 실행. 그 뒤 수집 갱신 주기 결정.

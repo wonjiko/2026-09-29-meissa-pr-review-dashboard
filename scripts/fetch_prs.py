@@ -1,6 +1,6 @@
 """Stage 2 - fetch every in-scope pull request with its reviews and review-request events.
 
-Three passes, all writing verbatim responses under raw/prs/<repo>/:
+Three passes, all writing verbatim responses under outputs/raw/prs/<repo>/:
 
   created   cursor paging over pullRequests(orderBy: CREATED_AT desc), stopped once
             createdAt falls before the window. CREATED_AT never changes, so the
@@ -167,7 +167,7 @@ def sized(template: str, cfg: dict, number: int | None = None) -> str:
 def load_manifest() -> dict:
     path = gh.RAW / "meta" / "repos.json"
     if not path.exists():
-        gh.log("raw/meta/repos.json missing - run fetch_repos.py first")
+        gh.log("outputs/raw/meta/repos.json missing - run fetch_repos.py first")
         sys.exit(1)
     return json.loads(path.read_text())
 

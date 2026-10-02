@@ -1,6 +1,6 @@
 """Stage 1 - enumerate org repositories and their in-window PR counts.
 
-Writes raw/meta/repos.json. The per-repo `expected_created_in_window` count comes
+Writes outputs/raw/meta/repos.json. The per-repo `expected_created_in_window` count comes
 from the search API and is the reference the verify stage checks the database against.
 """
 

@@ -1,4 +1,4 @@
-"""Stage 4 - derive every dashboard number from build/facts.db into dashboard/data.json.
+"""Stage 4 - derive every dashboard number from outputs/build/facts.db into outputs/dashboard/data.json.
 
 No figure is written by hand anywhere in this file; each one is the result of a SQL
 read over facts.db. Missing data stays null so that "none" and "not collected" are

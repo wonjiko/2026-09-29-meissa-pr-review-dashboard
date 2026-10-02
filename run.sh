@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Full regeneration pipeline. Every artifact under raw/, build/ and dashboard/ is
-# reproducible by running this; nothing downstream is edited by hand.
+# Full regeneration pipeline. Everything the scripts write lives under outputs/ and is
+# reproducible by running this; nothing there is edited by hand.
 #
 #   ./run.sh                 all stages
 #   ./run.sh repos           re-enumerate repositories and reference counts
 #   ./run.sh prs [repo...]   re-fetch pull requests (optionally a subset)
-#   ./run.sh offline         rebuild db + dashboard from existing raw/, no network
+#   ./run.sh offline         rebuild db + dashboard from existing outputs/raw/, no network
 #   ./run.sh dashboard       aggregate + render only
 #   ./run.sh check           load the rendered page in a real DOM and assert it drew
+#   ./run.sh pages           publish the rendered page to the gh-pages branch
 set -euo pipefail
 
 cd "$(dirname "$0")"
-mkdir -p raw build dashboard
+OUT=outputs
+mkdir -p "$OUT/raw" "$OUT/build" "$OUT/dashboard"
 export PYTHONUNBUFFERED=1
 PY=python3
 S=scripts
@@ -26,7 +28,7 @@ run_aggregate() { stage "5/6 aggregate";     $PY $S/aggregate.py; }
 run_render()    { stage "6/6 render";        $PY $S/render.py; }
 run_check()     {
   stage "check render"
-  local dir=build/domcheck
+  local dir="$OUT/build/domcheck"
   if [ ! -d "$dir/node_modules/jsdom" ]; then
     echo "provisioning jsdom into $dir (one-off)"
     mkdir -p "$dir"
@@ -35,7 +37,7 @@ run_check()     {
   # ESM resolves node_modules from the script's own directory, so run it from there.
   local root="$PWD"
   cp "$S/check_render.mjs" "$dir/check_render.mjs"
-  ( cd "$dir" && node check_render.mjs "$root/dashboard/index.html" )
+  ( cd "$dir" && node check_render.mjs "$root/$OUT/dashboard/index.html" )
 }
 
 mode="${1:-all}"
@@ -54,8 +56,10 @@ case "$mode" in
     run_aggregate; run_render ;;
   check)
     run_check ;;
+  pages)
+    stage "publish gh-pages"; $PY $S/publish_pages.py "$@" ;;
   *)
     echo "unknown mode: $mode" >&2; exit 2 ;;
 esac
 
-printf '\ndashboard: %s/dashboard/index.html\n' "$PWD"
+printf '\ndashboard: %s/outputs/dashboard/index.html\n' "$PWD"

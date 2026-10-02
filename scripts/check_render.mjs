@@ -13,8 +13,10 @@
  *  3. The in-page engine agrees with Python. data.json carries `reference`: the same
  *     figures computed by aggregate.py from facts.db over the FULL collection window. The
  *     page is asked for that window and every figure is compared. Counts, sums and churn
- *     must match EXACTLY; values that both sides round (hour percentiles, rates) are
- *     compared within a tolerance, because the two runtimes round independently.
+ *     must match EXACTLY. Rounded values (hour percentiles, rates, means) are compared
+ *     within a hair of each other: each rounding helper in the page engine uses the same
+ *     number of places as the matching round() in aggregate.py, so the only permitted
+ *     gap is float representation noise, not a second rounding step.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -55,6 +57,9 @@ const presets = [...doc.querySelectorAll('#presets button')];
 const sum = (list, key) => list.reduce((acc, r) => acc + (r[key] ?? 0), 0);
 const near = (a, b, tol) => a === null || a === undefined || b === null || b === undefined
   ? a === b : Math.abs(a - b) <= tol;
+// Both sides round every figure to the same number of places, so a difference beyond
+// float noise is a real divergence in the aggregation logic, not a rounding artefact.
+const ROUND_TOL = 1e-9;
 
 /* ---------- 1. structure ---------- */
 check('window basis is created', meta.basis === 'created', meta.basis);
@@ -63,6 +68,19 @@ check('facts shipped instead of one precomputed window',
   facts.counts.prs > 0 && facts.counts.pairs > 0 && facts.counts.reviews > 0,
   JSON.stringify(facts.counts));
 check('page exposes its aggregation engine', typeof dom.window.computeView === 'function');
+
+// Rounding rule, asserted directly rather than only through its effects on the figures.
+// Each pair is a value Python rounds one way and a naive toFixed() the other.
+const roundCases = [
+  [563.25, 1, 563.2], [563.35, 1, 563.4], [0.25, 1, 0.2], [0.75, 1, 0.8],
+  [2.5, 0, 2], [3.5, 0, 4], [432.3478, 1, 432.3], [747.8736, 1, 747.9],
+  [0.0625, 2, 0.06], [0.1875, 2, 0.19],
+];
+const roundBad = roundCases
+  .filter(([v, nd, want]) => dom.window.pyRoundTo(v, nd) !== want)
+  .map(([v, nd, want]) => `round(${v},${nd}): ${dom.window.pyRoundTo(v, nd)} vs ${want}`);
+check('rounding breaks an exact tie to the even digit, as Python does',
+  typeof dom.window.pyRoundTo === 'function' && roundBad.length === 0, roundBad.join(' | '));
 
 const controls = doc.querySelector('.controls');
 check('picker and date range share one control bar',
@@ -105,6 +123,22 @@ check('the matching preset is marked active on load',
 const chip = doc.getElementById('rangeChip').textContent;
 check('range chip states the window on screen',
   chip.includes(fromInput.value) && chip.includes(toInput.value), chip);
+
+// The sticky bar is narrow real estate, so it holds only what reacts to input. The two
+// fixed collection settings belong in the header, which scrolls away.
+const controlBar = doc.querySelector('.controls');
+check('fixed collection settings are not in the sticky bar',
+  controlBar.contains(doc.getElementById('basisChip')) === false
+    && controlBar.contains(doc.getElementById('archChip')) === false
+    && doc.querySelector('header').contains(doc.getElementById('basisChip')) === true
+    && doc.querySelector('header').contains(doc.getElementById('archChip')) === true);
+check('both collection settings are still stated on the page',
+  doc.getElementById('basisChip').textContent.includes('created')
+    && /archived 레포 (포함|제외)/.test(doc.getElementById('archChip').textContent),
+  `${doc.getElementById('basisChip').textContent} | ${doc.getElementById('archChip').textContent}`);
+check('the sticky bar keeps the picker, the dates, the presets and the live chips',
+  ['pick', 'from', 'to', 'presets', 'rangeChip', 'clampChip']
+    .every((id) => controlBar.contains(doc.getElementById(id))));
 
 const prsIn = (from, to) => dom.window.computeView(from, to).totals.prs_created_in_window;
 const full = prsIn(collectFrom, collectTo);
@@ -181,7 +215,7 @@ for (const [login, r] of Object.entries(refByReviewer)) {
   if (!e) continue;
   for (const k of exactKeys) if (e[k] !== r[k]) exactBad.push(`${login}.${k}: ${e[k]} vs ${r[k]}`);
   for (const k of roundedKeys) {
-    const tol = k.endsWith('_rate') || k.endsWith('_share') ? 0.0002 : 0.05;
+    const tol = ROUND_TOL;
     if (!near(e[k], r[k], tol)) roundedBad.push(`${login}.${k}: ${e[k]} vs ${r[k]}`);
   }
 }
@@ -198,10 +232,10 @@ view.size_overview.buckets.forEach((b, i) => {
   }
   for (const k of ['prs_share', 'churn_share', 'changed_files_share', 'review_coverage',
     'changes_rate', 'merged_without_review_rate']) {
-    if (!near(b[k], r[k], 0.0002)) bucketBad.push(`${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
+    if (!near(b[k], r[k], ROUND_TOL)) bucketBad.push(`${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
   }
   for (const k of ['churn_p50', 'files_p50', 'latency_p50_h', 'latency_p90_h', 'reviews_per_pr', 'comments_per_pr']) {
-    if (!near(b[k], r[k], 0.05)) bucketBad.push(`${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
+    if (!near(b[k], r[k], ROUND_TOL)) bucketBad.push(`${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
   }
 });
 check('size bucket table matches Python', bucketBad.length === 0, bucketBad.slice(0, 4).join(' | '));
@@ -210,7 +244,7 @@ for (const k of ['churn', 'changed_files', 'additions', 'deletions', 'prs', 'app
     `${view.size_overview.totals[k]} vs ${ref.size_overview.totals[k]}`);
 }
 check('churn concentration matches Python',
-  near(view.size_overview.totals.top_decile_churn_share, ref.size_overview.totals.top_decile_churn_share, 0.0002),
+  near(view.size_overview.totals.top_decile_churn_share, ref.size_overview.totals.top_decile_churn_share, ROUND_TOL),
   `${view.size_overview.totals.top_decile_churn_share} vs ${ref.size_overview.totals.top_decile_churn_share}`);
 
 const engineRepos = Object.fromEntries(view.repos.map((r) => [r.repo, r]));
@@ -229,10 +263,10 @@ for (const [name, r] of Object.entries(refRepos)) {
   }
   for (const k of ['prs_share', 'churn_share', 'changed_files_share', 'large_pr_rate',
     'review_coverage', 'changes_rate']) {
-    if (!near(e[k], r[k], 0.0002)) repoBad.push(`${name}.${k}: ${e[k]} vs ${r[k]}`);
+    if (!near(e[k], r[k], ROUND_TOL)) repoBad.push(`${name}.${k}: ${e[k]} vs ${r[k]}`);
   }
   for (const k of ['weight_index', 'churn_p50', 'churn_p90', 'churn_mean', 'latency_p50_h', 'latency_p90_h']) {
-    if (!near(e[k], r[k], 0.05)) repoBad.push(`${name}.${k}: ${e[k]} vs ${r[k]}`);
+    if (!near(e[k], r[k], ROUND_TOL)) repoBad.push(`${name}.${k}: ${e[k]} vs ${r[k]}`);
   }
 }
 check('every repo row matches Python', repoBad.length === 0, repoBad.slice(0, 4).join(' | '));
@@ -246,10 +280,10 @@ for (const r of ref.pr_authors) {
     if (e[k] !== r[k]) authorBad.push(`${r.author}.${k}: ${e[k]} vs ${r[k]}`);
   }
   for (const k of ['prs_share', 'churn_share']) {
-    if (!near(e[k], r[k], 0.0002)) authorBad.push(`${r.author}.${k}: ${e[k]} vs ${r[k]}`);
+    if (!near(e[k], r[k], ROUND_TOL)) authorBad.push(`${r.author}.${k}: ${e[k]} vs ${r[k]}`);
   }
   for (const k of ['weight_index', 'churn_p50', 'churn_mean']) {
-    if (!near(e[k], r[k], 0.05)) authorBad.push(`${r.author}.${k}: ${e[k]} vs ${r[k]}`);
+    if (!near(e[k], r[k], ROUND_TOL)) authorBad.push(`${r.author}.${k}: ${e[k]} vs ${r[k]}`);
   }
 }
 check('every PR author row matches Python', authorBad.length === 0, authorBad.slice(0, 4).join(' | '));
@@ -261,7 +295,7 @@ for (const k of ['prs_with_requests']) {
   }
 }
 for (const k of ['reviewers_per_pr_mean', 'reviewers_per_pr_p50', 'first_request_delay_p50_h', 'first_request_delay_p90_h']) {
-  if (!near(view.bulk_request_evidence[k], ref.bulk_request_evidence[k], 0.05)) {
+  if (!near(view.bulk_request_evidence[k], ref.bulk_request_evidence[k], ROUND_TOL)) {
     bulkBad.push(`${k}: ${view.bulk_request_evidence[k]} vs ${ref.bulk_request_evidence[k]}`);
   }
 }
@@ -280,10 +314,10 @@ engineDetail.by_size.forEach((b, i) => {
     if (b[k] !== r[k]) detailBad.push(`by_size ${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
   }
   for (const k of ['requested_share', 'response_rate', 'churn_share', 'changes_rate']) {
-    if (!near(b[k], r[k], 0.0002)) detailBad.push(`by_size ${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
+    if (!near(b[k], r[k], ROUND_TOL)) detailBad.push(`by_size ${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
   }
   for (const k of ['latency_p50_h', 'latency_p90_h', 'comments_per_review']) {
-    if (!near(b[k], r[k], 0.05)) detailBad.push(`by_size ${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
+    if (!near(b[k], r[k], ROUND_TOL)) detailBad.push(`by_size ${b.bucket}.${k}: ${b[k]} vs ${r[k]}`);
   }
 });
 const engRepoDet = Object.fromEntries(engineDetail.by_repo.map((r) => [r.repo, r]));
@@ -366,8 +400,8 @@ check('per-reviewer size section rendered', sizeHeads.some((h) => h === other + 
 check('heaviest-PR section rendered', sizeHeads.some((h) => h === other + ' 가장 큰 PR'));
 
 const sizeTable = [...doc.querySelectorAll('#orgSections table')].find(
-  (t) => t.querySelector('thead th')?.textContent === '크기'
-    && [...t.querySelectorAll('thead th')].some((th) => th.textContent === '변경량 비중'));
+  (t) => t.querySelector('thead th')?.dataset.label === '크기'
+    && [...t.querySelectorAll('thead th')].some((th) => th.dataset.label === '변경량 비중'));
 const lastBand = shown.size_overview.buckets[shown.size_overview.buckets.length - 1];
 check('size bucket table drew every band',
   sizeTable && sizeTable.querySelectorAll('tbody tr').length === shown.size_overview.buckets.length,
@@ -379,6 +413,91 @@ check('largest band churn share on screen == engine',
 
 const links = doc.querySelectorAll('tbody a[href^="https://github.com/"]').length;
 check('PR drill-down links rendered', links > 0, `${links} links`);
+
+/* ---------- one scrollbar per axis: no table nests a vertical scroller ---------- */
+check('no table clips itself to a fixed height',
+  doc.querySelectorAll('#reviewerSections .scroll, #orgSections .scroll').length === 0
+    && /max-height/.test(html) === false);
+const wrappers = [...doc.querySelectorAll('#reviewerSections table, #orgSections table')]
+  .map((t) => t.parentElement.className);
+check('every table sits in a horizontal-only wrapper',
+  wrappers.length > 0 && wrappers.every((c) => c === 'xscroll'),
+  `${wrappers.length} tables, classes: ${[...new Set(wrappers)].join('|')}`);
+check('the label column stays pinned while a wide table scrolls sideways',
+  /\.xscroll th:first-child, \.xscroll td:first-child \{[^}]*position: sticky/.test(html));
+const longest = [...doc.querySelectorAll('#reviewerSections table')]
+  .reduce((a, t) => Math.max(a, t.querySelectorAll('tbody tr').length), 0);
+check('long lists render every row rather than hiding them behind a scroller',
+  longest >= 20, `longest per-reviewer table: ${longest} rows`);
+
+/* ---------- scope separation: what the picker changes is fenced off ---------- */
+const gRv = doc.getElementById('gReviewer');
+const gOrg = doc.getElementById('gOrg');
+check('reviewer-scoped group wraps only the per-reviewer sections',
+  gRv?.contains(doc.getElementById('reviewerSections')) === true
+    && gRv.contains(doc.getElementById('orgSections')) === false);
+check('org-scoped group wraps only the org sections',
+  gOrg?.contains(doc.getElementById('orgSections')) === true
+    && gOrg.contains(doc.getElementById('reviewerSections')) === false);
+check('each group carries a scope badge',
+  gRv?.querySelector('.ghd .badge')?.textContent.includes('선택에 따라') === true
+    && gOrg?.querySelector('.ghd .badge')?.textContent.includes('선택과 무관') === true,
+  `${gRv?.querySelector('.ghd .badge')?.textContent} | ${gOrg?.querySelector('.ghd .badge')?.textContent}`);
+const rvBanner = () => doc.getElementById('rvTitle').textContent;
+check('reviewer group banner names the selected reviewer', rvBanner() === other, rvBanner());
+// jsdom reports no layout, so offsetHeight is 0 and the computed offset is '0px' here.
+// What is checkable is that the rule exists and the script did apply an inline top.
+check('group banners are sticky under the controls bar',
+  doc.querySelectorAll('.group > .ghd').length === 2
+    && [...doc.querySelectorAll('.group > .ghd')].every((n) => n.style.top !== '')
+    && /\.group > \.ghd \{[^}]*position: sticky/.test(html),
+  [...doc.querySelectorAll('.group > .ghd')].map((n) => n.style.top || '(unset)').join(' | '));
+
+// The org half must not re-aggregate on a reviewer switch. The one thing that may change
+// is which leaderboard row is highlighted, so that class is stripped before comparing.
+const third = shown.reviewers.map((r) => r.reviewer).find((l) => l !== other);
+const orgShape = () => doc.getElementById('orgSections').innerHTML.replace(/ class="(picked)?"/g, '');
+const orgShapeBefore = orgShape();
+const orgBannerBefore = doc.getElementById('orgSub').textContent;
+pick.value = third;
+pick.dispatchEvent(new dom.window.Event('change'));
+check('switching the reviewer leaves every org figure untouched', orgShape() === orgShapeBefore);
+check('switching the reviewer moves the leaderboard highlight only',
+  [...doc.querySelectorAll('#orgSections tr.picked')].length === 1
+    && doc.querySelector('#orgSections tr.picked').cells[0].textContent === third,
+  doc.querySelector('#orgSections tr.picked')?.cells[0].textContent);
+check('switching the reviewer leaves the org banner unchanged',
+  doc.getElementById('orgSub').textContent === orgBannerBefore);
+check('switching the reviewer updates the reviewer banner', rvBanner() === third, rvBanner());
+
+/* ---------- every rate names its denominator ---------- */
+const RATE = /(비율|응답률|비중|커버리지|당 )/;
+const unlabelled = [...doc.querySelectorAll('table thead th')]
+  .filter((th) => RATE.test(th.dataset.label || '') && !th.dataset.den)
+  .map((th) => th.dataset.label);
+check('every rate/share column carries a denominator sub-label',
+  unlabelled.length === 0, unlabelled.slice(0, 6).join(', ') || 'none missing');
+const rateCards = [...doc.querySelectorAll('#reviewerSections .card, #orgSections .card')]
+  .filter((c) => RATE.test(c.dataset.k || ''));
+const cardsNoDen = rateCards.filter((c) => !c.querySelector('.d'));
+check('every rate card carries a denominator line',
+  rateCards.length > 0 && cardsNoDen.length === 0,
+  `${rateCards.length} rate cards, ${cardsNoDen.length} missing`);
+const respRow = shown.reviewers.find((r) => r.reviewer === third);
+const respDen = [...doc.querySelectorAll('#reviewerSections .card')]
+  .find((c) => c.dataset.k === '응답률 (요청받은 PR 대비)')?.querySelector('.d')?.textContent;
+check('PR-basis 응답률 card spells out its own fraction',
+  respDen === `${respRow.fulfilled_prs.toLocaleString()} / ${respRow.requested_prs.toLocaleString()} PR`,
+  `${respDen}`);
+const rvCardKeys = [...doc.querySelectorAll('#reviewerSections .card')].map((c) => c.dataset.k);
+check('no bare 응답률 label survives, and both bases are named',
+  !rvCardKeys.includes('응답률')
+    && rvCardKeys.includes('응답률 (요청받은 PR 대비)')
+    && rvCardKeys.includes('응답률 (요청받은 변경량 대비)'));
+check('both definition lists are populated',
+  doc.querySelectorAll('#rvDefs dt').length >= 8 && doc.querySelectorAll('#orgDefs dt').length >= 8,
+  `${doc.querySelectorAll('#rvDefs dt').length} / ${doc.querySelectorAll('#orgDefs dt').length}`);
+
 check('no script error after interaction', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 300));
 
 process.exit(failures.length ? 1 : 0);

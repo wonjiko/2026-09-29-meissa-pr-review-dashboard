@@ -1,6 +1,6 @@
 """Stage 5 - prove the database matches what GitHub reports, and that nothing was invented.
 
-Checks, each written to build/verification.json with pass/fail:
+Checks, each written to outputs/build/verification.json with pass/fail:
   A  per-repo PR count vs the search API's issueCount
   B  backfill PR count vs its own search issueCount
   C  every page that reported hasNextPage has the follow-up page on disk

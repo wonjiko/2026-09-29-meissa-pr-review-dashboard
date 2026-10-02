@@ -1,7 +1,7 @@
 """GitHub GraphQL/REST access through the `gh` CLI, plus raw-response persistence.
 
-Every remote response is written to raw/ verbatim together with a `_meta` block so
-that every later stage can be rebuilt from disk without touching the network.
+Every remote response is written to outputs/raw/ verbatim together with a `_meta` block
+so that every later stage can be rebuilt from disk without touching the network.
 """
 
 from __future__ import annotations
@@ -16,9 +16,12 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-RAW = ROOT / "raw"
-BUILD = ROOT / "build"
-DASHBOARD = ROOT / "dashboard"
+# Everything a script writes lives under outputs/. Nothing there is edited by hand and
+# nothing there is tracked in git - deleting the whole tree costs one `./run.sh`.
+OUTPUTS = ROOT / "outputs"
+RAW = OUTPUTS / "raw"
+BUILD = OUTPUTS / "build"
+DASHBOARD = OUTPUTS / "dashboard"
 CONFIG_PATH = ROOT / "config.json"
 
 

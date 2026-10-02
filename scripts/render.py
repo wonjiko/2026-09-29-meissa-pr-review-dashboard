@@ -1,4 +1,4 @@
-"""Stage 6 - render dashboard/index.html from dashboard/data.json.
+"""Stage 6 - render outputs/dashboard/index.html from outputs/dashboard/data.json.
 
 The HTML is one self-contained file. data.json is embedded verbatim and carries the FACTS
 (pull requests, review-request pairs, reviews) rather than one window's summary, so the page
@@ -44,6 +44,7 @@ TEMPLATE = """<!DOCTYPE html>
     border-bottom: 1px solid var(--line); padding: 10px 32px 12px;
     box-shadow: 0 6px 18px -12px #000; }
   .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .bar.setbar { margin-top: 10px; }
   .bar label { color: var(--dim); font-size: 12px; }
   .bar .sep { color: var(--line); }
   select, input[type=date] { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
@@ -59,17 +60,43 @@ TEMPLATE = """<!DOCTYPE html>
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
   h2 .note { color: var(--dim); font-weight: 400; font-size: 12px; margin-left: 8px; }
   h3 { font-size: 13px; font-weight: 600; margin: 0 0 4px; color: var(--dim); }
+  /* ---- scope groups: what the reviewer picker changes vs what it does not ---- */
+  .group { border: 1px solid var(--line); border-radius: 14px; margin-bottom: 40px; }
+  .group > .ghd { position: sticky; z-index: 20; display: flex; align-items: baseline; gap: 10px;
+    flex-wrap: wrap; padding: 12px 18px; border-bottom: 1px solid var(--line);
+    border-radius: 13px 13px 0 0; backdrop-filter: blur(6px); }
+  .group > .gbody { padding: 20px 18px 2px; }
+  .group > .gbody > section:last-child { margin-bottom: 20px; }
+  .group.rv { border-color: #4a3a72; }
+  .group.rv > .ghd { background: #1d1830; border-bottom-color: #4a3a72; }
+  .group.org { border-color: #2c4a76; }
+  .group.org > .ghd { background: #151d2c; border-bottom-color: #2c4a76; }
+  .ghd .gt { font-size: 15px; font-weight: 700; }
+  .ghd .gs { color: var(--dim); font-size: 12px; }
+  .badge { border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge.rv { background: rgba(163,113,247,0.18); color: #c9a9ff; border: 1px solid #6b4fa8; }
+  .badge.org { background: rgba(91,157,255,0.16); color: #9dc2ff; border: 1px solid #3d6ba8; }
+  .defs { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 26px; font-size: 12px; }
+  .defs > summary { cursor: pointer; color: var(--dim); font-weight: 600; }
+  .defs dl { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; margin: 12px 0 2px; }
+  .defs dt { color: var(--fg); font-weight: 600; white-space: nowrap; }
+  .defs dd { margin: 0; color: var(--dim); }
+  .defs dd b { color: var(--fg); font-weight: 600; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 12px; margin-top: 12px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
   .card .k { color: var(--dim); font-size: 12px; margin-bottom: 6px; }
   .card .v { font-size: 24px; font-weight: 600; letter-spacing: -0.5px; }
   .card .u { color: var(--dim); font-size: 12px; font-weight: 400; margin-left: 3px; }
+  /* the denominator, spelled out under every rate so no share is ambiguous */
+  .card .d { color: var(--dim); font-size: 11px; margin-top: 6px; line-height: 1.4; }
   .card.hi { border-color: var(--pick); }
   table { width: 100%; border-collapse: collapse; background: var(--panel);
     border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 12px; font-size: 13px; }
   th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { background: var(--panel2); color: var(--dim); font-weight: 500; font-size: 12px;
-    position: sticky; top: 0; z-index: 5; cursor: pointer; user-select: none; }
+    cursor: pointer; user-select: none; vertical-align: bottom; }
+  th .den { display: block; font-size: 10px; font-weight: 400; color: #6f7788; }
   th:first-child, td:first-child { text-align: left; }
   td.txt, th.txt { text-align: left; white-space: normal; }
   tbody tr:hover { background: var(--panel2); }
@@ -79,7 +106,16 @@ TEMPLATE = """<!DOCTYPE html>
   a:hover { text-decoration: underline; }
   button.link { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
   button.link:hover { text-decoration: underline; }
-  .scroll { max-height: 460px; overflow: auto; border-radius: 10px; }
+  /* Single-axis page scroll: no table nests a vertical scroller inside the page's own.
+     Wide tables scroll horizontally only, with the label column pinned so the row
+     stays identifiable. Solid backgrounds are required - a translucent sticky cell
+     would show the columns sliding underneath it. */
+  .xscroll { overflow-x: auto; border-radius: 10px; }
+  .xscroll th:first-child, .xscroll td:first-child { position: sticky; left: 0; }
+  .xscroll td:first-child { z-index: 2; background: var(--panel); }
+  .xscroll th:first-child { z-index: 3; background: var(--panel2); }
+  .xscroll tbody tr:hover td:first-child { background: var(--panel2); }
+  .xscroll tbody tr.picked td:first-child { background: #241b3a; }
   .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .toggle button { background: var(--panel); color: var(--dim); border: 0; padding: 7px 12px;
     font: inherit; font-size: 12px; cursor: pointer; }
@@ -100,6 +136,11 @@ TEMPLATE = """<!DOCTYPE html>
 <header>
   <h1 id="title"></h1>
   <div class="sub" id="subtitle"></div>
+  <!-- collection settings: fixed for the whole page, so they stay out of the sticky bar -->
+  <div class="bar setbar">
+    <span class="chip" id="basisChip"></span>
+    <span class="chip" id="archChip"></span>
+  </div>
 </header>
 <div class="controls">
   <div class="bar">
@@ -111,14 +152,38 @@ TEMPLATE = """<!DOCTYPE html>
     <input type="date" id="to">
     <div class="toggle" id="presets"></div>
     <span class="chip" id="rangeChip"></span>
-    <span class="chip" id="basisChip"></span>
-    <span class="chip" id="archChip"></span>
     <span class="chip" id="clampChip" style="display:none"></span>
   </div>
 </div>
 <main>
-  <div id="reviewerSections"></div>
-  <div id="orgSections"></div>
+  <div class="group rv" id="gReviewer">
+    <div class="ghd">
+      <span class="badge rv">리뷰어 선택에 따라 바뀜</span>
+      <span class="gt" id="rvTitle"></span>
+      <span class="gs" id="rvSub"></span>
+    </div>
+    <div class="gbody">
+      <details class="defs">
+        <summary>이 구역 지표 정의 — 비율 이름 뒤 괄호가 분모입니다</summary>
+        <dl id="rvDefs"></dl>
+      </details>
+      <div id="reviewerSections"></div>
+    </div>
+  </div>
+  <div class="group org" id="gOrg">
+    <div class="ghd">
+      <span class="badge org">리뷰어 선택과 무관 · 고정</span>
+      <span class="gt">조직 전체 분석</span>
+      <span class="gs" id="orgSub"></span>
+    </div>
+    <div class="gbody">
+      <details class="defs">
+        <summary>이 구역 지표 정의 — 비율 이름 뒤 괄호가 분모입니다</summary>
+        <dl id="orgDefs"></dl>
+      </details>
+      <div id="orgSections"></div>
+    </div>
+  </div>
 </main>
 <footer id="footer"></footer>
 <script type="application/json" id="payload">__DATA__</script>
@@ -149,10 +214,47 @@ const hrs = v => v === null || v === undefined ? '–' : (v >= 48 ? (v / 24).toF
    check_render.mjs can prove the two agree. */
 
 const DAY = 86400;
-const r2 = v => v === null || v === undefined ? null : Number(v.toFixed(2));
-const r3 = v => v === null || v === undefined ? null : Number(v.toFixed(3));
-const r4 = v => v === null || v === undefined ? null : Number(v.toFixed(4));
-const r6 = v => v === null || v === undefined ? null : Number(v.toFixed(6));
+// Each rounding helper must use the SAME number of places as the matching round() in
+// aggregate.py. Rounding a mean to 2 places here where Python rounds to 1 rounds twice
+// (432.3478 -> 432.35 -> 432.4) and lands on a different number than Python's 432.3.
+//
+// Python rounds the double's EXACT value half-to-even. toFixed() sends a tie away from
+// zero, and ties really occur: 563.25 is exactly representable, so Python answers 563.2
+// where toFixed(1) answers 563.3. Round over the exact decimal expansion instead --
+// toFixed(20) carries far more digits than a double can distinguish, so a value merely
+// NEAR a tie still reads as near rather than as one.
+function pyRoundTo(v, nd) {
+  if (v === null || v === undefined) return null;
+  if (!isFinite(v) || Math.abs(v) >= 1e20) return v;
+  const neg = v < 0;
+  const s = Math.abs(v).toFixed(20);
+  const dot = s.indexOf('.');
+  const digits = s.slice(0, dot) + s.slice(dot + 1);
+  const keep = dot + nd;
+  const head = digits.slice(0, keep).split('').map(Number);
+  const rest = digits.slice(keep);
+  const lead = rest.charCodeAt(0) - 48;
+  let up = lead > 5;
+  if (lead === 5) {
+    up = /[1-9]/.test(rest.slice(1))
+      ? true
+      : head[head.length - 1] % 2 === 1;  // exact tie -> carry only to an even digit
+  }
+  if (up) {
+    for (let i = head.length - 1; ; i--) {
+      if (i < 0) { head.unshift(1); break; }
+      if (head[i] === 9) { head[i] = 0; } else { head[i]++; break; }
+    }
+  }
+  const out = head.join('');
+  const ip = out.slice(0, out.length - nd) || '0';
+  return Number((neg ? '-' : '') + ip + (nd ? '.' + out.slice(out.length - nd) : ''));
+}
+const r1 = v => pyRoundTo(v, 1);
+const r2 = v => pyRoundTo(v, 2);
+const r3 = v => pyRoundTo(v, 3);
+const r4 = v => pyRoundTo(v, 4);
+const r6 = v => pyRoundTo(v, 6);
 // Python's round() breaks a tie to the even integer; Math.round() always goes up. The
 // percentile index hits exact .5 often enough (any even-length sample at q=0.5) that the
 // two disagree unless this is matched.
@@ -324,7 +426,7 @@ function reviewerTable(S) {
       verdicts,
       approve_rate: verdicts ? r4(s.approved / verdicts) : null,
       changes_rate: verdicts ? r4(s.changes_requested / verdicts) : null,
-      changes_per_100_reviews: s.reviews_given ? r2(s.changes_requested * 100 / s.reviews_given) : null,
+      changes_per_100_reviews: s.reviews_given ? r1(s.changes_requested * 100 / s.reviews_given) : null,
       unsolicited_prs: s.unsolicited.size,
       requested_churn: s.requested_churn,
       requested_churn_share: shareOf(s.requested_churn, S.totalChurn),
@@ -333,7 +435,7 @@ function reviewerTable(S) {
       reviewed_churn: revChurn.length ? sumOf(revChurn) : null,
       reviewed_churn_share: revChurn.length ? shareOf(sumOf(revChurn), S.totalChurn) : null,
       reviewed_churn_p50: percentile(revChurn, 0.5),
-      reviewed_churn_mean: revChurn.length ? r2(sumOf(revChurn) / revChurn.length) : null,
+      reviewed_churn_mean: revChurn.length ? r1(sumOf(revChurn) / revChurn.length) : null,
       latency_small_p50_h: small,
       latency_large_p50_h: large,
       latency_size_gap_h: (small !== null && large !== null) ? r2(large - small) : null,
@@ -395,13 +497,13 @@ function sizeOverview(S) {
       churn_missing_prs: S.prs.filter(p => p.churn === null).length,
       churn_stats: {
         n: S.churns.length, sum: S.churns.length ? S.totalChurn : null,
-        mean: S.churns.length ? r2(S.totalChurn / S.churns.length) : null,
+        mean: S.churns.length ? r1(S.totalChurn / S.churns.length) : null,
         p50: percentile(S.churns, 0.5), p90: percentile(S.churns, 0.9),
         max: S.churns.length ? Math.max(...S.churns) : null,
       },
       files_stats: {
         n: files.length, sum: files.length ? sumOf(files) : null,
-        mean: files.length ? r2(sumOf(files) / files.length) : null,
+        mean: files.length ? r1(sumOf(files) / files.length) : null,
         p50: percentile(files, 0.5), p90: percentile(files, 0.9),
         max: files.length ? Math.max(...files) : null,
       },
@@ -455,7 +557,7 @@ function repoRows(S) {
       deletions: sumOf(created.map(p => p.deletions || 0)),
       changed_files: repoFiles, changed_files_share: shareOf(repoFiles, S.totalFiles),
       churn_p50: percentile(churns, 0.5), churn_p90: percentile(churns, 0.9),
-      churn_mean: churns.length ? r2(repoChurn / churns.length) : null,
+      churn_mean: churns.length ? r1(repoChurn / churns.length) : null,
       churn_max: churns.length ? Math.max(...churns) : null,
       weight_index: (churnShare && prsShare) ? r2(churnShare / prsShare) : null,
       large_prs: large, large_pr_rate: shareOf(large, churns.length),
@@ -490,7 +592,7 @@ function authorRows(S) {
       author, prs_created: list.length, prs_share: prsShare,
       churn: churn || null, churn_share: churnShare,
       churn_p50: percentile(churns, 0.5),
-      churn_mean: churns.length ? r2(churn / churns.length) : null,
+      churn_mean: churns.length ? r1(churn / churns.length) : null,
       changed_files: sumOf(list.map(p => p.changed_files || 0)) || null,
       weight_index: (churn && list.length && churnShare && prsShare) ? r2(churnShare / prsShare) : null,
     });
@@ -602,7 +704,7 @@ function reviewerDetail(S, reviewer) {
     response_rate: s.requested ? r4(s.reviewed / s.requested) : null,
     churn_response_rate: s.requested_churn ? r4(s.reviewed_churn / s.requested_churn) : null,
     requested_churn_share: shareOf(s.requested_churn, reviewerChurn),
-    churn_per_pr: s.requested ? r2(s.requested_churn / s.requested) : null,
+    churn_per_pr: s.requested ? r1(s.requested_churn / s.requested) : null,
     latency_p50_h: percentile(s.lat, 0.5),
     repo_prs_total: repoTotals.get(s.repo) || 0,
   })).sort((a, b) => b.requested - a.requested);
@@ -622,7 +724,7 @@ function reviewerDetail(S, reviewer) {
     requested_churn: s.requested_churn,
     response_rate: s.requested ? r4(s.reviewed / s.requested) : null,
     requested_churn_share: shareOf(s.requested_churn, reviewerChurn),
-    churn_per_pr: s.requested ? r2(s.requested_churn / s.requested) : null,
+    churn_per_pr: s.requested ? r1(s.requested_churn / s.requested) : null,
     latency_p50_h: percentile(s.lat, 0.5),
   })).sort((a, b) => b.requested - a.requested);
 
@@ -709,7 +811,7 @@ function scopeTotals(S) {
     distinct_pr_authors: new Set(S.prs.map(p => p.author)).size,
     churn_total: S.totalChurn,
     changed_files_total: S.totalFiles,
-    churn_per_pr_mean: S.prs.length ? r2(S.totalChurn / S.prs.length) : null,
+    churn_per_pr_mean: S.prs.length ? r1(S.totalChurn / S.prs.length) : null,
   };
 }
 
@@ -726,6 +828,8 @@ function computeView(fromDate, toDate) {
   };
 }
 window.computeView = computeView;
+// exposed so check_render.mjs can assert the rounding rule itself, not only its effects
+window.pyRoundTo = pyRoundTo;
 
 /* ================= layout helpers ================= */
 function section(host, title, note) {
@@ -741,9 +845,10 @@ function section(host, title, note) {
 function cards(host, items) {
   const wrap = el('div', { class: 'cards' });
   for (const it of items) {
-    wrap.appendChild(el('div', { class: 'card' + (it.hi ? ' hi' : '') }, [
+    wrap.appendChild(el('div', { class: 'card' + (it.hi ? ' hi' : ''), 'data-k': it.k }, [
       el('div', { class: 'k', text: it.k }),
       el('div', { class: 'v', html: it.v + (it.u ? '<span class="u">' + it.u + '</span>' : '') }),
+      it.d ? el('div', { class: 'd', text: it.d }) : null,
     ]));
   }
   host.appendChild(wrap);
@@ -754,10 +859,18 @@ function table(host, cols, data, opts = {}) {
     host.appendChild(el('div', { class: 'empty', text: opts.empty || '해당 항목 없음' }));
     return { redraw: () => {} };
   }
-  const box = el('div', { class: opts.scroll ? 'scroll' : '' });
+  const box = el('div', { class: 'xscroll' });
   const t = el('table');
   const hr = el('tr');
-  cols.forEach(c => hr.appendChild(el('th', { class: c.txt ? 'txt' : '', text: c.label })));
+  cols.forEach(c => hr.appendChild(el('th', {
+    class: c.txt ? 'txt' : '',
+    'data-label': c.label,
+    ...(c.den ? { 'data-den': c.den } : {}),
+    title: c.den ? c.label + ' — 분모: ' + c.den : c.label,
+  }, [
+    el('span', { text: c.label }),
+    c.den ? el('span', { class: 'den', text: '/ ' + c.den }) : null,
+  ])));
   t.appendChild(el('thead', {}, [hr]));
   const tbody = el('tbody');
   t.appendChild(tbody);
@@ -1007,31 +1120,80 @@ function renderReviewer(login) {
   const det = view.detail(login);
   const win = VIEW.from + ' ~ ' + VIEW.to;
 
+  document.getElementById('rvTitle').textContent = login;
+  document.getElementById('rvSub').textContent =
+    '이 구역의 모든 수치는 ' + login + ' 한 사람 기준입니다 · ' + win + ' 사이에 생성된 PR';
+
   const s0 = section(host, login + ' 요약', win + ' 사이에 생성된 PR 기준');
+  const orgChurn = view.totals.churn_total;
   cards(s0, [
-    { k: '리뷰 요청받은 PR', v: num(t.requested_prs), hi: true },
-    { k: '실제 리뷰한 PR', v: num(t.fulfilled_prs), hi: true },
-    { k: '응답률', v: pct(t.response_rate), hi: true },
-    { k: '첫 응답 p50', v: hrs(t.latency_p50_h) },
-    { k: '첫 응답 p90', v: hrs(t.latency_p90_h) },
-    { k: '첫 응답 평균', v: hrs(t.latency_mean_h) },
-    { k: '미응답 · 열린 PR', v: num(t.outstanding_open) },
-    { k: '미응답 채로 머지', v: num(t.merged_without_review), u: ' (' + pct(t.merged_without_review_rate) + ')' },
-    { k: '남긴 리뷰', v: num(t.reviews_given) },
-    { k: '리뷰당 인라인 코멘트', v: num(t.comments_per_review) },
-    { k: '내용 있는 리뷰 비율', v: pct(t.substantive_review_rate) },
-    { k: 'APPROVED / CHANGES', v: num(t.approved) + ' / ' + num(t.changes_requested) },
-    { k: 'CHANGES 비율', v: pct(t.changes_rate), u: ' of ' + num(t.verdicts), hi: true },
-    { k: 'APPROVED 비율', v: pct(t.approve_rate) },
-    { k: '요청받은 변경량', v: num(t.requested_churn), u: ' lines' },
-    { k: '전체 변경량 대비', v: pct(t.requested_churn_share), hi: true },
-    { k: '리뷰한 변경량', v: num(t.reviewed_churn), u: ' (' + pct(t.reviewed_churn_share) + ')' },
-    { k: '변경량 기준 응답률', v: pct(t.churn_response_rate) },
-    { k: '리뷰한 PR 중앙 크기', v: num(t.reviewed_churn_p50), u: ' lines' },
+    {
+      k: '리뷰 요청받은 PR', v: num(t.requested_prs), hi: true,
+      d: '기간 내 생성된 PR ' + num(view.totals.prs_created_in_window) + '건 중 이 리뷰어가 요청받은 수',
+    },
+    {
+      k: '실제 리뷰한 PR', v: num(t.fulfilled_prs), hi: true,
+      d: '요청받은 ' + num(t.requested_prs) + '건 중 리뷰를 남긴 수',
+    },
+    {
+      k: '응답률 (요청받은 PR 대비)', v: pct(t.response_rate), hi: true,
+      d: num(t.fulfilled_prs) + ' / ' + num(t.requested_prs) + ' PR',
+    },
+    { k: '첫 응답 p50', v: hrs(t.latency_p50_h), d: '요청→첫 리뷰. 표본 ' + num(t.latency_samples) + '쌍' },
+    { k: '첫 응답 p90', v: hrs(t.latency_p90_h), d: '요청→첫 리뷰. 표본 ' + num(t.latency_samples) + '쌍' },
+    { k: '첫 응답 평균', v: hrs(t.latency_mean_h), d: '요청→첫 리뷰. 표본 ' + num(t.latency_samples) + '쌍' },
+    {
+      k: '미응답 · 열린 PR', v: num(t.outstanding_open),
+      d: '요청받은 ' + num(t.requested_prs) + '건 중 리뷰 없이 아직 열려 있음',
+    },
+    {
+      k: '미응답 채로 머지', v: num(t.merged_without_review), u: ' (' + pct(t.merged_without_review_rate) + ')',
+      d: num(t.merged_without_review) + ' / ' + num(t.requested_prs) + ' PR (요청받은 PR 대비)',
+    },
+    { k: '남긴 리뷰', v: num(t.reviews_given), d: '기간 내 생성된 PR에 남긴 리뷰 건수. 셀프리뷰 제외' },
+    {
+      k: '리뷰당 인라인 코멘트', v: num(t.comments_per_review),
+      d: num(t.inline_comments) + ' / ' + num(t.reviews_given) + ' 리뷰',
+    },
+    {
+      k: '내용 있는 리뷰 비율 (남긴 리뷰 대비)', v: pct(t.substantive_review_rate),
+      d: '분모 ' + num(t.reviews_given) + '리뷰. 코멘트나 본문이 있는 리뷰',
+    },
+    {
+      k: 'APPROVED / CHANGES', v: num(t.approved) + ' / ' + num(t.changes_requested),
+      d: '합계 ' + num(t.verdicts) + '건이 아래 두 비율의 분모',
+    },
+    {
+      k: 'CHANGES 비율 (판정 리뷰 대비)', v: pct(t.changes_rate), hi: true,
+      d: num(t.changes_requested) + ' / ' + num(t.verdicts) + ' (APPROVED+CHANGES. COMMENTED·DISMISSED 제외)',
+    },
+    {
+      k: 'APPROVED 비율 (판정 리뷰 대비)', v: pct(t.approve_rate),
+      d: num(t.approved) + ' / ' + num(t.verdicts),
+    },
+    {
+      k: '요청받은 변경량', v: num(t.requested_churn), u: ' lines',
+      d: '요청받은 ' + num(t.requested_prs) + '건의 additions+deletions 합',
+    },
+    {
+      k: '요청 변경량 비중 (조직 전체 변경량 대비)', v: pct(t.requested_churn_share), hi: true,
+      d: num(t.requested_churn) + ' / ' + num(orgChurn) + ' lines',
+    },
+    {
+      k: '리뷰한 변경량', v: num(t.reviewed_churn), u: ' (' + pct(t.reviewed_churn_share) + ')',
+      d: '괄호는 조직 전체 ' + num(orgChurn) + '줄 대비',
+    },
+    {
+      k: '응답률 (요청받은 변경량 대비)', v: pct(t.churn_response_rate),
+      d: num(t.fulfilled_churn) + ' / ' + num(t.requested_churn) + ' lines',
+    },
+    { k: '리뷰한 PR 중앙 크기', v: num(t.reviewed_churn_p50), u: ' lines', d: '리뷰를 남긴 PR들의 변경량 중앙값' },
     {
       k: '첫 응답 p50 (작은→큰)',
       v: hrs(t.latency_small_p50_h) + ' → ' + hrs(t.latency_large_p50_h),
       hi: true,
+      d: '≤' + num(SMALL_MAX) + '줄 ' + num(t.latency_small_samples) + '쌍 → ≥'
+        + num(LARGE_MIN) + '줄 ' + num(t.latency_large_samples) + '쌍',
     },
   ]);
 
@@ -1046,21 +1208,21 @@ function renderReviewer(login) {
   barChart(s2, det.latency_histogram, 'bucket', 'count', 'var(--pick)');
 
   const sz = section(host, login + ' PR 크기별',
-    '크기 = additions + deletions. 비중은 이 리뷰어가 요청받은 전체 변경량 대비');
+    '크기 = additions + deletions. 비중의 분모는 이 리뷰어가 요청받은 전체 (조직 전체가 아님)');
   table(sz, [
     { label: '크기', key: 'bucket', txt: true },
     { label: '요청 PR', key: 'requested' },
-    { label: '갯수 비중', key: 'requested_share', render: r => pct(r.requested_share) },
+    { label: '갯수 비중', den: '본인 요청 PR ' + num(t.requested_prs), key: 'requested_share', render: r => pct(r.requested_share) },
     { label: '변경량', key: 'churn' },
-    { label: '변경량 비중', key: 'churn_share', render: r => pct(r.churn_share) },
+    { label: '변경량 비중', den: '본인 요청 변경량 ' + num(t.requested_churn), key: 'churn_share', render: r => pct(r.churn_share) },
     { label: '리뷰', key: 'reviewed' },
-    { label: '응답률', key: 'response_rate', render: r => pct(r.response_rate) },
-    { label: '첫 응답 p50', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
-    { label: '첫 응답 p90', key: 'latency_p90_h', render: r => hrs(r.latency_p90_h) },
-    { label: '리뷰당 코멘트', key: 'comments_per_review' },
+    { label: '응답률', den: '이 구간의 요청 PR', key: 'response_rate', render: r => pct(r.response_rate) },
+    { label: '첫 응답 p50', den: '이 구간 요청→첫 리뷰', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
+    { label: '첫 응답 p90', den: '이 구간 요청→첫 리뷰', key: 'latency_p90_h', render: r => hrs(r.latency_p90_h) },
+    { label: '리뷰당 코멘트', den: '이 구간에 남긴 리뷰', key: 'comments_per_review' },
     { label: 'APPROVED', key: 'approved' },
     { label: 'CHANGES', key: 'changes_requested' },
-    { label: 'CHANGES 비율', key: 'changes_rate', render: r => pct(r.changes_rate) },
+    { label: 'CHANGES 비율', den: 'APPROVED+CHANGES', key: 'changes_rate', render: r => pct(r.changes_rate) },
     { label: '미응답(열림)', key: 'outstanding_open' },
     { label: '미응답 머지', key: 'merged_without_review' },
   ], det.by_size, { sort: -1 });
@@ -1071,34 +1233,34 @@ function renderReviewer(login) {
     { key: 'changes_rate', label: 'CHANGES 비율', color: '#f85149', fmt: pct },
   ]);
 
-  const s3 = section(host, login + ' 상세 분포');
+  const s3 = section(host, login + ' 상세 분포', '비중의 분모는 이 리뷰어가 요청받은 전체 변경량');
   const g = el('div', { class: 'grid2' });
   const left = el('div'), right = el('div');
-  left.appendChild(el('h3', { text: '레포별 (비중은 이 리뷰어의 요청 변경량 대비)' }));
+  left.appendChild(el('h3', { text: '레포별 (이 리뷰어가 요청받은 PR만)' }));
   table(left, [
     { label: '레포', key: 'repo', txt: true },
     { label: '요청', key: 'requested' },
     { label: '리뷰', key: 'reviewed' },
-    { label: '응답률', key: 'response_rate', render: r => pct(r.response_rate) },
+    { label: '응답률', den: '이 레포의 요청 PR', key: 'response_rate', render: r => pct(r.response_rate) },
     { label: '변경량', key: 'requested_churn' },
-    { label: '변경량 비중', key: 'requested_churn_share', render: r => pct(r.requested_churn_share) },
-    { label: 'PR당 변경량', key: 'churn_per_pr' },
-    { label: '변경량 응답률', key: 'churn_response_rate', render: r => pct(r.churn_response_rate) },
-    { label: 'p50', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
+    { label: '변경량 비중', den: '본인 요청 변경량 ' + num(t.requested_churn), key: 'requested_churn_share', render: r => pct(r.requested_churn_share) },
+    { label: 'PR당 변경량', den: '이 레포의 요청 PR', key: 'churn_per_pr' },
+    { label: '응답률(변경량)', den: '이 레포의 요청 변경량', key: 'churn_response_rate', render: r => pct(r.churn_response_rate) },
+    { label: 'p50', den: '이 레포 요청→첫 리뷰', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
     { label: '미응답(열림)', key: 'outstanding_open' },
     { label: '미응답 머지', key: 'merged_without_review' },
-  ], det.by_repo, { scroll: true, sort: 1 });
-  right.appendChild(el('h3', { text: 'PR 작성자별' }));
+  ], det.by_repo, { sort: 1 });
+  right.appendChild(el('h3', { text: 'PR 작성자별 (이 리뷰어가 요청받은 PR만)' }));
   table(right, [
     { label: '작성자', key: 'author', txt: true },
     { label: '요청', key: 'requested' },
     { label: '리뷰', key: 'reviewed' },
-    { label: '응답률', key: 'response_rate', render: r => pct(r.response_rate) },
+    { label: '응답률', den: '이 작성자의 요청 PR', key: 'response_rate', render: r => pct(r.response_rate) },
     { label: '변경량', key: 'requested_churn' },
-    { label: '변경량 비중', key: 'requested_churn_share', render: r => pct(r.requested_churn_share) },
-    { label: 'PR당 변경량', key: 'churn_per_pr' },
-    { label: 'p50', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
-  ], det.by_pr_author, { scroll: true, sort: 1 });
+    { label: '변경량 비중', den: '본인 요청 변경량 ' + num(t.requested_churn), key: 'requested_churn_share', render: r => pct(r.requested_churn_share) },
+    { label: 'PR당 변경량', den: '이 작성자의 요청 PR', key: 'churn_per_pr' },
+    { label: 'p50', den: '요청→첫 리뷰', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
+  ], det.by_pr_author, { sort: 1 });
   g.appendChild(left); g.appendChild(right);
   s3.appendChild(g);
 
@@ -1115,7 +1277,7 @@ function renderReviewer(login) {
     { label: '리뷰 수', key: 'reviews' },
     { label: '코멘트', key: 'inline_comments' },
     { label: 'verdict', key: 'verdict', txt: true },
-  ], det.heaviest_prs, { scroll: true, sort: 4, empty: '요청받은 PR 없음' });
+  ], det.heaviest_prs, { sort: 4, empty: '요청받은 PR 없음' });
 
   const s4 = section(host, login + ' 미응답 · 열린 PR', num(det.outstanding_open.length) + '건, 대기 시간 순');
   table(s4, [
@@ -1127,7 +1289,7 @@ function renderReviewer(login) {
     { label: '크기', key: 'bucket', txt: true },
     { label: '변경량', key: 'churn' },
     { label: 'pending 표시', key: 'still_pending_snapshot', render: r => r.still_pending_snapshot ? 'yes' : 'no' },
-  ], det.outstanding_open, { scroll: true, sort: 4, empty: '미응답 상태로 열려 있는 PR 없음' });
+  ], det.outstanding_open, { sort: 4, empty: '미응답 상태로 열려 있는 PR 없음' });
 
   const s5 = section(host, login + ' 리뷰 없이 머지된 PR', num(det.merged_without_review.length) + '건');
   table(s5, [
@@ -1139,7 +1301,7 @@ function renderReviewer(login) {
     { label: '크기', key: 'bucket', txt: true },
     { label: '변경량', key: 'churn' },
     { label: '파일', key: 'changed_files' },
-  ], det.merged_without_review, { scroll: true, sort: 4, empty: '요청받은 PR이 전부 리뷰를 받고 머지됨' });
+  ], det.merged_without_review, { sort: 4, empty: '요청받은 PR이 전부 리뷰를 받고 머지됨' });
 
   if (leaderboard) leaderboard.redraw(view.reviewers);
 }
@@ -1151,8 +1313,13 @@ function renderOrg() {
   leaderboard = null;
   const win = VIEW ? VIEW.from + ' ~ ' + VIEW.to : '';
 
+  document.getElementById('orgSub').textContent =
+    '리뷰어 ' + num(view.reviewers.length) + '명 전원 · 레포 ' + num(view.totals.repos_in_scope) +
+    '곳 합산. 위쪽 리뷰어 선택과 무관하게 조회 기간에만 반응합니다 · ' + win;
+
   {
-    const s = section(orgHost, '리뷰어 전체 비교', '이름을 누르면 위쪽 상세가 그 리뷰어로 바뀝니다. 열 제목을 누르면 정렬됩니다');
+    const s = section(orgHost, '리뷰어 전체 비교',
+      '리뷰어 ' + num(view.reviewers.length) + '명 전원. 이름을 누르면 위쪽 구역이 그 리뷰어로 바뀌고 이 표의 해당 행이 강조됩니다. 수치 자체는 선택과 무관합니다');
     leaderboard = table(s, [
       {
         label: '리뷰어', key: 'reviewer', txt: true,
@@ -1162,29 +1329,29 @@ function renderOrg() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         } } }),
       },
-      { label: '요청', key: 'requested_prs' },
-      { label: '이행', key: 'fulfilled_prs' },
-      { label: '응답률', key: 'response_rate', render: r => pct(r.response_rate) },
+      { label: '요청', den: '기간 내 생성 PR ' + num(view.totals.prs_created_in_window), key: 'requested_prs' },
+      { label: '이행', den: '본인 요청 PR', key: 'fulfilled_prs' },
+      { label: '응답률', den: '본인 요청 PR', key: 'response_rate', render: r => pct(r.response_rate) },
       { label: '리뷰 수', key: 'reviews_given' },
-      { label: 'p50', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
-      { label: 'p90', key: 'latency_p90_h', render: r => hrs(r.latency_p90_h) },
+      { label: 'p50', den: '요청→첫 리뷰', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
+      { label: 'p90', den: '요청→첫 리뷰', key: 'latency_p90_h', render: r => hrs(r.latency_p90_h) },
       { label: '미응답(열림)', key: 'outstanding_open' },
       { label: '미응답 머지', key: 'merged_without_review' },
-      { label: '리뷰당 코멘트', key: 'comments_per_review' },
-      { label: '내용 있는 비율', key: 'substantive_review_rate', render: r => pct(r.substantive_review_rate) },
+      { label: '리뷰당 코멘트', den: '본인 리뷰 수', key: 'comments_per_review' },
+      { label: '내용 있는 비율', den: '본인 리뷰 수', key: 'substantive_review_rate', render: r => pct(r.substantive_review_rate) },
       { label: 'APPROVED', key: 'approved' },
       { label: 'CHANGES', key: 'changes_requested' },
-      { label: 'CHANGES 비율', key: 'changes_rate', render: r => pct(r.changes_rate) },
+      { label: 'CHANGES 비율', den: 'APPROVED+CHANGES', key: 'changes_rate', render: r => pct(r.changes_rate) },
       { label: '요청 변경량', key: 'requested_churn' },
-      { label: '변경량 비중', key: 'requested_churn_share', render: r => pct(r.requested_churn_share) },
+      { label: '변경량 비중', den: '조직 전체 ' + num(view.totals.churn_total) + '줄', key: 'requested_churn_share', render: r => pct(r.requested_churn_share) },
       { label: '리뷰한 변경량', key: 'reviewed_churn' },
-      { label: '변경량 응답률', key: 'churn_response_rate', render: r => pct(r.churn_response_rate) },
-      { label: 'PR 중앙 크기', key: 'reviewed_churn_p50' },
-      { label: `p50 (≤${SMALL_MAX})`, key: 'latency_small_p50_h', render: r => hrs(r.latency_small_p50_h) },
-      { label: `p50 (≥${LARGE_MIN})`, key: 'latency_large_p50_h', render: r => hrs(r.latency_large_p50_h) },
-      { label: '크기별 차이', key: 'latency_size_gap_h', render: r => r.latency_size_gap_h === null || r.latency_size_gap_h === undefined ? null : (r.latency_size_gap_h > 0 ? '+' : '') + hrs(r.latency_size_gap_h) },
-      { label: '요청 외 리뷰', key: 'unsolicited_prs' },
-    ], view.reviewers, { scroll: true, sort: 4, highlight: r => r.reviewer === pick.value, empty: '이 기간에 리뷰 요청이 없습니다' });
+      { label: '응답률(변경량)', den: '본인 요청 변경량', key: 'churn_response_rate', render: r => pct(r.churn_response_rate) },
+      { label: 'PR 중앙 크기', den: '리뷰한 PR의 변경량', key: 'reviewed_churn_p50' },
+      { label: `p50 (≤${SMALL_MAX}줄)`, den: '작은 PR 요청→첫 리뷰', key: 'latency_small_p50_h', render: r => hrs(r.latency_small_p50_h) },
+      { label: `p50 (≥${LARGE_MIN}줄)`, den: '큰 PR 요청→첫 리뷰', key: 'latency_large_p50_h', render: r => hrs(r.latency_large_p50_h) },
+      { label: '크기별 차이', den: '큰 p50 − 작은 p50', key: 'latency_size_gap_h', render: r => r.latency_size_gap_h === null || r.latency_size_gap_h === undefined ? null : (r.latency_size_gap_h > 0 ? '+' : '') + hrs(r.latency_size_gap_h) },
+      { label: '요청 외 리뷰', den: '요청 없이 남긴 리뷰의 PR 수', key: 'unsolicited_prs' },
+    ], view.reviewers, { sort: 4, highlight: r => r.reviewer === pick.value, empty: '이 기간에 리뷰 요청이 없습니다' });
   }
 
   {
@@ -1193,33 +1360,39 @@ function renderOrg() {
     const s = section(orgHost, '변경 규모 분포',
       '크기 = additions + deletions (GitHub이 PR에 보고하는 값). 갯수 비중과 변경량 비중을 나란히 봅니다');
     cards(s, [
-      { k: '전체 변경량', v: num(t.churn), u: ' lines' },
-      { k: '변경 파일', v: num(t.changed_files) },
-      { k: 'PR당 평균', v: num(t.churn_stats.mean), u: ' lines' },
-      { k: 'PR 크기 p50', v: num(t.churn_stats.p50), u: ' lines' },
-      { k: 'p25 / p75', v: num(t.churn_p25) + ' / ' + num(t.churn_p75) },
-      { k: 'p90 / p99', v: num(t.churn_stats.p90) + ' / ' + num(t.churn_p99) },
-      { k: '최대 PR', v: num(t.churn_stats.max), u: ' lines' },
-      { k: '상위 10% PR이 차지하는 변경량', v: pct(t.top_decile_churn_share), hi: true },
-      { k: '조직 전체 CHANGES 비율', v: pct(t.changes_rate), u: ' of ' + num(t.verdicts), hi: true },
+      { k: '전체 변경량', v: num(t.churn), u: ' lines', d: '기간 내 생성된 PR ' + num(view.totals.prs_created_in_window) + '건의 합. 아래 변경량 비중의 분모' },
+      { k: '변경 파일', v: num(t.changed_files), d: '같은 PR들의 changedFiles 합' },
+      { k: 'PR당 평균', v: num(t.churn_stats.mean), u: ' lines', d: '전체 변경량 / PR 수' },
+      { k: 'PR 크기 p50', v: num(t.churn_stats.p50), u: ' lines', d: 'PR 변경량 분포의 중앙값' },
+      { k: 'p25 / p75', v: num(t.churn_p25) + ' / ' + num(t.churn_p75), d: 'PR 변경량 분포' },
+      { k: 'p90 / p99', v: num(t.churn_stats.p90) + ' / ' + num(t.churn_p99), d: 'PR 변경량 분포' },
+      { k: '최대 PR', v: num(t.churn_stats.max), u: ' lines', d: '단일 PR 변경량 최대' },
+      {
+        k: '상위 10% PR의 변경량 비중', v: pct(t.top_decile_churn_share), hi: true,
+        d: '변경량 상위 10% PR의 합 / 전체 변경량 ' + num(t.churn) + '줄',
+      },
+      {
+        k: '조직 CHANGES 비율 (판정 리뷰 대비)', v: pct(t.changes_rate), hi: true,
+        d: '분모 ' + num(t.verdicts) + '건 (APPROVED+CHANGES. COMMENTED·DISMISSED 제외)',
+      },
     ]);
     table(s, [
       { label: '크기', key: 'bucket', txt: true },
       { label: 'PR', key: 'prs' },
-      { label: '갯수 비중', key: 'prs_share', render: r => pct(r.prs_share) },
+      { label: '갯수 비중', den: '기간 내 PR ' + num(view.totals.prs_created_in_window), key: 'prs_share', render: r => pct(r.prs_share) },
       { label: '변경량', key: 'churn' },
-      { label: '변경량 비중', key: 'churn_share', render: r => pct(r.churn_share) },
+      { label: '변경량 비중', den: '조직 전체 ' + num(t.churn) + '줄', key: 'churn_share', render: r => pct(r.churn_share) },
       { label: '변경 파일', key: 'changed_files' },
-      { label: '파일 비중', key: 'changed_files_share', render: r => pct(r.changed_files_share) },
+      { label: '파일 비중', den: '조직 전체 ' + num(t.changed_files) + '파일', key: 'changed_files_share', render: r => pct(r.changed_files_share) },
       { label: 'PR 중앙 크기', key: 'churn_p50' },
-      { label: '리뷰 커버리지', key: 'review_coverage', render: r => pct(r.review_coverage) },
-      { label: '첫 응답 p50', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
-      { label: '첫 응답 p90', key: 'latency_p90_h', render: r => hrs(r.latency_p90_h) },
-      { label: 'PR당 리뷰', key: 'reviews_per_pr' },
-      { label: 'PR당 코멘트', key: 'comments_per_pr' },
+      { label: '리뷰 커버리지', den: '이 구간의 PR', key: 'review_coverage', render: r => pct(r.review_coverage) },
+      { label: '첫 응답 p50', den: '이 구간 요청→첫 리뷰', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
+      { label: '첫 응답 p90', den: '이 구간 요청→첫 리뷰', key: 'latency_p90_h', render: r => hrs(r.latency_p90_h) },
+      { label: 'PR당 리뷰', den: '이 구간의 PR', key: 'reviews_per_pr' },
+      { label: 'PR당 코멘트', den: '이 구간의 PR', key: 'comments_per_pr' },
       { label: 'APPROVED', key: 'approved' },
       { label: 'CHANGES', key: 'changes_requested' },
-      { label: 'CHANGES 비율', key: 'changes_rate', render: r => pct(r.changes_rate) },
+      { label: 'CHANGES 비율', den: 'APPROVED+CHANGES', key: 'changes_rate', render: r => pct(r.changes_rate) },
       { label: '리뷰 없이 머지', key: 'merged_without_review' },
     ], so.buckets, { sort: -1 });
     multiBarChart(s, so.buckets, 'bucket', [
@@ -1233,13 +1406,13 @@ function renderOrg() {
 
   {
     const b = view.bulk_request_evidence;
-    const s = section(orgHost, '리뷰 요청 패턴');
+    const s = section(orgHost, '리뷰 요청 패턴', '리뷰어 지정이 개별인지 팀 일괄인지 보는 구역');
     cards(s, [
-      { k: '요청이 있는 PR', v: num(b.prs_with_requests) },
-      { k: 'PR당 리뷰어 평균', v: num(b.reviewers_per_pr_mean) + '명' },
-      { k: 'PR당 리뷰어 중앙값', v: num(b.reviewers_per_pr_p50) + '명' },
-      { k: 'PR 생성→첫 요청 p50', v: hrs(b.first_request_delay_p50_h) },
-      { k: 'PR 생성→첫 요청 p90', v: hrs(b.first_request_delay_p90_h) },
+      { k: '요청이 있는 PR', v: num(b.prs_with_requests), d: '기간 내 PR ' + num(view.totals.prs_created_in_window) + '건 중 리뷰어 지정이 있는 수' },
+      { k: 'PR당 리뷰어 평균', v: num(b.reviewers_per_pr_mean) + '명', d: '분모 ' + num(b.prs_with_requests) + ' PR' },
+      { k: 'PR당 리뷰어 중앙값', v: num(b.reviewers_per_pr_p50) + '명', d: '분모 ' + num(b.prs_with_requests) + ' PR' },
+      { k: 'PR 생성→첫 요청 p50', v: hrs(b.first_request_delay_p50_h), d: '분모 ' + num(b.prs_with_requests) + ' PR' },
+      { k: 'PR 생성→첫 요청 p90', v: hrs(b.first_request_delay_p90_h), d: '분모 ' + num(b.prs_with_requests) + ' PR' },
     ]);
     barChart(s, b.reviewers_per_pr_distribution.map(r => ({ l: r.reviewers + '명 요청', v: r.prs })), 'l', 'v', 'var(--accent)');
   }
@@ -1260,29 +1433,29 @@ function renderOrg() {
       { label: '레포', key: 'repo', txt: true, render: r => r.repo + (r.is_archived ? ' <span class="null">(archived)</span>' : '') },
       { label: '언어', key: 'language', txt: true },
       { label: 'PR 생성', key: 'prs_created' },
-      { label: '갯수 비중', key: 'prs_share', render: r => pct(r.prs_share) },
+      { label: '갯수 비중', den: '기간 내 PR ' + num(view.totals.prs_created_in_window), key: 'prs_share', render: r => pct(r.prs_share) },
       { label: '변경량', key: 'churn' },
-      { label: '변경량 비중', key: 'churn_share', render: r => pct(r.churn_share) },
-      { label: '가중 지수', key: 'weight_index' },
+      { label: '변경량 비중', den: '조직 전체 ' + num(view.totals.churn_total) + '줄', key: 'churn_share', render: r => pct(r.churn_share) },
+      { label: '가중 지수', den: '변경량 비중 ÷ 갯수 비중', key: 'weight_index' },
       { label: '변경 파일', key: 'changed_files' },
       { label: 'PR 중앙 크기', key: 'churn_p50' },
       { label: 'PR p90 크기', key: 'churn_p90' },
       { label: '최대 PR', key: 'churn_max' },
       { label: `${LARGE_MIN}줄+ PR`, key: 'large_prs' },
-      { label: '큰 PR 비율', key: 'large_pr_rate', render: r => pct(r.large_pr_rate) },
-      { label: '첫 응답 p50', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
-      { label: '첫 응답 p90', key: 'latency_p90_h', render: r => hrs(r.latency_p90_h) },
-      { label: '리뷰 커버리지', key: 'review_coverage', render: r => pct(r.review_coverage) },
-      { label: 'PR당 코멘트', key: 'comments_per_pr' },
+      { label: '큰 PR 비율', den: '이 레포의 PR', key: 'large_pr_rate', render: r => pct(r.large_pr_rate) },
+      { label: '첫 응답 p50', den: '이 레포 요청→첫 리뷰', key: 'latency_p50_h', render: r => hrs(r.latency_p50_h) },
+      { label: '첫 응답 p90', den: '이 레포 요청→첫 리뷰', key: 'latency_p90_h', render: r => hrs(r.latency_p90_h) },
+      { label: '리뷰 커버리지', den: '이 레포의 PR', key: 'review_coverage', render: r => pct(r.review_coverage) },
+      { label: 'PR당 코멘트', den: '이 레포의 PR', key: 'comments_per_pr' },
       { label: 'APPROVED', key: 'approved' },
       { label: 'CHANGES', key: 'changes_requested' },
-      { label: 'CHANGES 비율', key: 'changes_rate', render: r => pct(r.changes_rate) },
+      { label: 'CHANGES 비율', den: 'APPROVED+CHANGES', key: 'changes_rate', render: r => pct(r.changes_rate) },
       { label: '머지', key: 'prs_merged' },
       { label: '열림', key: 'prs_open' },
       { label: '닫힘(미머지)', key: 'prs_closed_unmerged' },
       { label: '작성자 수', key: 'distinct_authors' },
-      { label: '수집 기준값(전체기간)', key: 'expected_created_in_window' },
-    ], view.repos, { scroll: true, sort: 2 });
+      { label: '수집 기준값', den: '수집 범위 전체, 조회 기간 아님', key: 'expected_created_in_window' },
+    ], view.repos, { sort: 2 });
     multiBarChart(s, view.repos.slice(0, 12), 'repo', [
       { key: 'prs_share', label: '갯수 비중', color: '#5b9dff', fmt: pct },
       { key: 'churn_share', label: '변경량 비중', color: '#a371f7', fmt: pct },
@@ -1296,14 +1469,14 @@ function renderOrg() {
     table(s, [
       { label: '작성자', key: 'author', txt: true },
       { label: 'PR 생성', key: 'prs_created' },
-      { label: '갯수 비중', key: 'prs_share', render: r => pct(r.prs_share) },
+      { label: '갯수 비중', den: '기간 내 PR ' + num(view.totals.prs_created_in_window), key: 'prs_share', render: r => pct(r.prs_share) },
       { label: '변경량', key: 'churn' },
-      { label: '변경량 비중', key: 'churn_share', render: r => pct(r.churn_share) },
-      { label: '가중 지수', key: 'weight_index' },
+      { label: '변경량 비중', den: '조직 전체 ' + num(view.totals.churn_total) + '줄', key: 'churn_share', render: r => pct(r.churn_share) },
+      { label: '가중 지수', den: '변경량 비중 ÷ 갯수 비중', key: 'weight_index' },
       { label: 'PR 중앙 크기', key: 'churn_p50' },
       { label: 'PR 평균 크기', key: 'churn_mean' },
       { label: '변경 파일', key: 'changed_files' },
-    ], view.pr_authors, { scroll: true, sort: 1 });
+    ], view.pr_authors, { sort: 1 });
   }
 
   document.getElementById('subtitle').textContent =
@@ -1319,6 +1492,49 @@ function renderOrg() {
 }
 
 /* ================= boot ================= */
+/* Every rate on the page is a fraction, and two different rates were both reading
+   "응답률" before. These lists name the denominator of each one, per scope. */
+function defList(host, rows) {
+  const dl = document.getElementById(host);
+  dl.innerHTML = '';
+  for (const [term, body] of rows) {
+    dl.appendChild(el('dt', { text: term }));
+    dl.appendChild(el('dd', { html: body }));
+  }
+}
+
+defList('rvDefs', [
+  ['응답률 (요청받은 PR 대비)', '이 리뷰어가 <b>리뷰를 남긴 PR 수</b> ÷ <b>리뷰 요청을 받은 PR 수</b>. 요청 1건 = (PR, 리뷰어) 한 쌍'],
+  ['응답률 (요청받은 변경량 대비)', '리뷰를 남긴 PR의 <b>변경량 합</b> ÷ 요청받은 PR의 <b>변경량 합</b>. 큰 PR을 건너뛰면 PR 수 기준보다 낮아집니다'],
+  ['요청 변경량 비중', '이 리뷰어가 요청받은 변경량 ÷ <b>조직 전체 변경량</b>. 이 항목만 분모가 조직 전체이고, 상세 표의 비중은 본인 요청분이 분모입니다'],
+  ['갯수 비중 / 변경량 비중 (상세 표)', '구간·레포·작성자별 값 ÷ <b>이 리뷰어가 요청받은 전체</b>. 같은 표 안에서 합이 100%'],
+  ['CHANGES 비율', 'CHANGES_REQUESTED ÷ (<b>APPROVED + CHANGES_REQUESTED</b>). COMMENTED·DISMISSED는 분모에서 제외'],
+  ['내용 있는 리뷰 비율', '인라인 코멘트나 본문이 있는 리뷰 ÷ <b>이 리뷰어가 남긴 리뷰 수</b>'],
+  ['미응답 채로 머지 비율', '리뷰 없이 머지된 PR ÷ <b>요청받은 PR 수</b>'],
+  ['첫 응답 p50 / p90', '<b>요청 시각 → 그 PR에 남긴 첫 리뷰 시각</b>. 리뷰가 없는 요청은 표본에서 빠지므로 응답률과 함께 봐야 합니다'],
+  ['미이행 잔량', '요청받고 아직 리뷰하지 않은 건수. 리뷰·요청 철회·PR 종료로 줄어듭니다'],
+]);
+
+defList('orgDefs', [
+  ['갯수 비중', '구간·레포·작성자별 PR 수 ÷ <b>조회 기간에 생성된 전체 PR 수</b>'],
+  ['변경량 비중', '구간·레포·작성자별 변경량 ÷ <b>조회 기간 전체 변경량</b>. 변경량 = additions + deletions'],
+  ['가중 지수', '<b>변경량 비중 ÷ 갯수 비중</b>. 1보다 크면 PR 수보다 변경량 쪽이 무겁습니다'],
+  ['리뷰 커버리지', '사람 리뷰가 1건 이상 있는 PR ÷ <b>그 구간·레포의 PR 수</b>. 리뷰어 개인의 응답률과 다른 지표입니다'],
+  ['CHANGES 비율', 'CHANGES_REQUESTED ÷ (<b>APPROVED + CHANGES_REQUESTED</b>). 리뷰어 구역과 같은 정의'],
+  ['큰 PR 비율', '변경량 ' + LARGE_MIN + '줄 이상 PR ÷ <b>그 레포의 PR 수</b>'],
+  ['상위 10% PR의 변경량 비중', '변경량 상위 10% PR의 합 ÷ <b>전체 변경량</b>'],
+  ['첫 응답 p50 / p90', '요청 시각 → 첫 리뷰 시각. <b>리뷰어를 구분하지 않고</b> 모든 요청 쌍을 합친 분포'],
+  ['수집 기준값', '검증용. <b>수집 범위 전체</b>(' + COLLECT_FROM + ' ~ ' + COLLECT_TO + ')의 값이라 조회 기간을 좁히면 위 PR 수와 일치하지 않습니다'],
+]);
+
+/* the group banners sit right under the sticky controls bar, whose height varies with wrapping */
+function syncGroupHeaders() {
+  const h = document.querySelector('.controls').offsetHeight;
+  document.querySelectorAll('.group > .ghd').forEach(n => { n.style.top = h + 'px'; });
+}
+syncGroupHeaders();
+addEventListener('resize', syncGroupHeaders);
+
 document.getElementById('title').textContent = META.org + ' PR 리뷰 대시보드';
 document.getElementById('basisChip').textContent = '기간 기준: PR 생성일 (created)';
 document.getElementById('archChip').textContent = 'archived 레포 ' + (META.include_archived ? '포함' : '제외');
@@ -1330,9 +1546,9 @@ document.getElementById('footer').innerHTML =
   ' · raw 페이지 ' + num(Number(META.raw_pr_pages)) + ' + 오버플로 ' + num(Number(META.raw_overflow_pages)) +
   ' · 기본 리뷰어 ' + META.default_reviewer +
   ' · 기본 조회 기간 최근 ' + num(META.view_default_days) + '일' +
-  ' · 이 페이지는 <code>dashboard/data.json</code>에 담긴 PR ' + num(F.counts.prs) +
+  ' · 이 페이지는 <code>outputs/dashboard/data.json</code>에 담긴 PR ' + num(F.counts.prs) +
   '건 · 요청쌍 ' + num(F.counts.pairs) + '건 · 리뷰 ' + num(F.counts.reviews) +
-  '건의 사실값을 선택한 기간으로 직접 집계합니다. 사실값은 전부 <code>build/facts.db</code>에서 나옵니다.';
+  '건의 사실값을 선택한 기간으로 직접 집계합니다. 사실값은 전부 <code>outputs/build/facts.db</code>에서 나옵니다.';
 </script>
 </body>
 </html>

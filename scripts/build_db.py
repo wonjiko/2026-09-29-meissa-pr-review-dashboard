@@ -1,4 +1,4 @@
-"""Stage 3 - rebuild build/facts.db from raw/ only. No network access.
+"""Stage 3 - rebuild outputs/build/facts.db from outputs/raw/ only. No network access.
 
 The database holds facts as GitHub reported them; every derived metric is computed
 later in aggregate.py from SQL. Re-running this is safe and fully replaces the file.

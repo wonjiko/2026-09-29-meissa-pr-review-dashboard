@@ -128,11 +128,8 @@ def main() -> None:
     gh.log(f"parent commit: {parent or '(new branch)'}")
 
     if args.dry_run:
-        pages = subprocess.run(
-            ["gh", "api", f"repos/{owner}/{repo}/pages"], capture_output=True, text=True
-        )
-        state = json.loads(pages.stdout).get("html_url") if pages.returncode == 0 else "not enabled"
-        gh.log(f"Pages site: {state}")
+        live = site_state(owner, repo)
+        gh.log(f"Pages site: {live.get('html_url') if live else 'not enabled'}")
         gh.log("dry run - nothing written")
         return
 
@@ -182,17 +179,30 @@ def main() -> None:
     # Enabling the site is independent of whether the content changed: an unchanged page
     # must still be able to turn a site on that is not yet serving.
     if not args.enable:
-        gh.log("branch published; Pages site NOT enabled (pass --enable to turn it on)")
+        # Report what the site is actually doing. Saying "NOT enabled" here is wrong once
+        # the site exists -- the push has already replaced what it serves.
+        live = site_state(owner, repo)
+        if live is None:
+            gh.log("branch published; Pages site NOT enabled (pass --enable to turn it on)")
+        else:
+            gh.log(f"branch published; site already serving: {live.get('html_url')} "
+                   f"(status {live.get('status')})")
         return
     enable_site(owner, repo)
 
 
-def enable_site(owner: str, repo: str) -> None:
+def site_state(owner: str, repo: str) -> dict | None:
+    """The Pages site's current record, or None when no site exists for the repo."""
     got = subprocess.run(
         ["gh", "api", f"repos/{owner}/{repo}/pages"], capture_output=True, text=True
     )
-    if got.returncode == 0:
-        gh.log(f"Pages already enabled: {json.loads(got.stdout).get('html_url')}")
+    return json.loads(got.stdout) if got.returncode == 0 else None
+
+
+def enable_site(owner: str, repo: str) -> None:
+    live = site_state(owner, repo)
+    if live is not None:
+        gh.log(f"Pages already enabled: {live.get('html_url')}")
         return
     made = subprocess.run(
         ["gh", "api", "-X", "POST", f"repos/{owner}/{repo}/pages",
@@ -203,11 +213,8 @@ def enable_site(owner: str, repo: str) -> None:
         # Pushing gh-pages to a public repo can auto-enable the site, so POST then races
         # with GitHub and returns 409. That is the wanted end state, not a failure.
         if "already enabled" in made.stdout:
-            again = subprocess.run(
-                ["gh", "api", f"repos/{owner}/{repo}/pages"], capture_output=True, text=True
-            )
-            url = json.loads(again.stdout).get("html_url") if again.returncode == 0 else "?"
-            gh.log(f"Pages already enabled: {url}")
+            again = site_state(owner, repo)
+            gh.log(f"Pages already enabled: {(again or {}).get('html_url', '?')}")
             return
         gh.log(f"enabling Pages failed: {made.stdout.strip() or made.stderr.strip()}")
         sys.exit(1)
